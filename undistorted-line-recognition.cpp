@@ -14,48 +14,62 @@
 #include <cstring>
 #include <errno.h>
 //#include <stdexcept>
+// a comment
+// for UART
+// Define Constants
+const char *uart_target = "/dev/ttyUSB0";
+#define     NSERIAL_CHAR   256
+#define     VMINX          1
+#define     MSG_LEN        15
+#define     BAUDRATE       B9600
 
 //////variables//////
 int whiteblackthreshold = 50;
-int pathDepth = 2;
+int pathDepth = 10;
 int erodeIterations = 3;
 int dilateIterations = 4;
-int searchRadius = 120;
-int searchPoints = 15;
+int searchRadius = 50;
+int searchPoints = 40;
 std::string version = "0.1.1";
-float angleThresh = 0.1;
+double lengthWeightModifier = 1.0;
+double angleWeightModifier = 1.0;
+float angleThresh = 0.01;
+float borderThresh = 0.01;
+double relativePosition = 0.5;
 /////////////////////
 
-std::vector<cv::Point>  findSurroundingPixels(cv::Mat image, cv::Point centerPixel,int radius, int pointAmount){
-// Finds a circle of pixels around a center pixel. Returns an array of the resulting pixels
-// image: the image to search in. Used to check if the pixel is in image bounds
-// centerPixel: the central pixel around which the circle is drawn
-// radius: the radius of the circle
-// pointAmount: the amount of points on the circle
+std::vector<cv::Point> getOrderedSurroundingPoints(cv::Mat image, cv::Point centerPixel, int radius, int pointAmount) {
+    std::vector<cv::Point> points; // create array to store the points
 
-	std::vector<cv::Point> points; //create array to store the points
-	for(int i = 0; i < pointAmount; i++){ //iterate over the amount of points
-		double angle = 2.0*M_PI*i/pointAmount; //calculate the angle of the point
-		cv::Point point(centerPixel.x + radius * sin(angle),centerPixel.y - radius * cos(angle)); //calculate the point
-		if((point.x <= image.size().width && point.x >= 0) && (point.y <= image.size().height && point.y >= 0)){ //check if the point is in the image bounds
-			points.push_back(point); //add the point to the array
-		}
-	}
-	return points; //return the array
+    for (int i = 0; i < pointAmount; i++) { // iterate over the amount of points
+        double angle = 2.0 * M_PI * i / pointAmount; // calculate the angle of the point
+        cv::Point point(centerPixel.x + radius * sin(angle), centerPixel.y - radius * cos(angle)); // calculate the point
+        if ((point.x >= 0 && point.x < image.size().width) && (point.y >= 0 && point.y < image.size().height)) { // check if the point is in the image bounds
+            points.push_back(point); // add the point to the array
+        }
+    }
+
+    // Sort points from top to bottom
+    std::sort(points.begin(), points.end(), [](const cv::Point& a, const cv::Point& b) {
+        return a.y < b.y || (a.y == b.y && a.x < b.x);
+    });
+
+    return points; // return the array
 }
 
-void drawScanFlower(cv::Mat image, std::vector<cv::Point> centers){
-// Draws a pattern of lines and a circle of dots around a center pixel
-// image: the image to draw on
-// centers: the center pixels around which the pattern is drawn
+void drawScanFlower(cv::Mat image, std::vector<cv::Point> centers) {
+    // Draws a pattern of lines and a circle of dots around a center pixel
+    // image: the image to draw on
+    // centers: the center pixels around which the pattern is drawn
 
-	for(int j = 0; j < centers.size(); j++){ //iterate over the amount of center pixels
-		std::vector<cv::Point> nextPixels = findSurroundingPixels(image, centers[j], searchRadius, searchPoints); //find the surrounding pixels and store them in an array
-		for(int i = 0; i < nextPixels.size(); i++){ //iterate over the amount of surrounding pixels
-			line(image, centers[j], nextPixels[i], cv::Scalar(255, 255, 255), 1); //draw a line from the center pixel to the surrounding pixel
-			circle(image, nextPixels[i], 2, cv::Scalar(255, 0, 0), -1); //draw a dot at the surrounding pixel
-		}
-	}
+    for (int j = 0; j < centers.size(); j++) { // iterate over the amount of center pixels
+        std::vector<cv::Point> nextPixels = getOrderedSurroundingPoints(image, centers[j], searchRadius, searchPoints); // get the surrounding pixels in a specific order
+        for (int i = nextPixels.size() - 1; i >= 0; i--) { // iterate over the amount of surrounding pixels in reverse order
+            line(image, centers[j], nextPixels[i], cv::Scalar(255, 255, 255), 1); // draw a line from the center pixel to the surrounding pixel
+            int blueIntensity = 255 - (i * (255 / nextPixels.size())); // calculate decreasing blue tone
+            circle(image, nextPixels[i], 2, cv::Scalar(255, 0, blueIntensity), -1); // draw a dot at the surrounding pixel with decreasing blue tone
+        }
+    }
 }
 
 std::vector<cv::Mat> cameraCalibration(std::string path){
@@ -95,38 +109,137 @@ std::vector<cv::Mat> cameraCalibration(std::string path){
 	return calibrationData; //return the calibration data
 }
 
-std::Pair<cv::Mat, cv::Point> findPath(int repetitions, int searchRadius, cv::Point startpoint, cv::Mat image, cv::Mat outputImage){
-	std::vector<cv::Point> nextPixels; //find the surrounding pixels and store them in an array
-	std::vector<cv::Point> validPixels, goingToCheck, homePoint;
-	cv::Point lastPoint = startpoint;
-	homePoint.push_back(startpoint);
+double calculateDistance(const cv::Point& p1, const cv::Point& p2) {
+    return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
+}
 
-	nextPixels = findSurroundingPixels(image, startpoint, searchRadius, searchPoints);
+double calculateAngle(const cv::Point& p1, const cv::Point& p2, const cv::Point& p3) {
+    double angle1 = atan2(p2.y - p1.y, p2.x - p1.x);
+    double angle2 = atan2(p3.y - p2.y, p3.x - p2.x);
+    return fabs(angle1 - angle2);
+}
 
-	for (int i = 0; i < searchPoints; i++){ //iterate over the amount of surrounding pixels
-		if(nextPixels[i].x > 0 && nextPixels[i].x < image.cols - 1 && nextPixels[i].y > 0 && nextPixels[i].y < image.rows - 1 && image.at<uchar>(nextPixels[i]) == 255){ //check if the pixel is white and within bounds, excluding the perimeter
-			line(outputImage, startpoint, nextPixels[i], cv::Scalar(0, 255, 0), 1); //draw a line from the startpoint to the surrounding pixel
-			goingToCheck.push_back(nextPixels[i]); //add the surrounding pixel to the array
-			lastPoint = nextPixels[i];  // Update last point found
-		}
-	}
+std::vector<std::vector<cv::Point>> getBranchedPoints(const std::vector<cv::Point>& points, int searchRadius, cv::Mat image, int repetitions) {
+    std::vector<std::vector<cv::Point>> branchedPoints;
+    double minAngle = M_PI / 6; // Minimum angle in radians (30 degrees)
+    double maxAngle = 5 * M_PI / 6; // Maximum angle in radians (150 degrees)
 
-	for(int i = 0; i < repetitions; i++){ //iterate over the amount of repetitions
-		for(int j = 0; j < goingToCheck.size(); j++){
-			nextPixels = findSurroundingPixels(image, goingToCheck[j], searchRadius, searchPoints); //find the surrounding pixels and store them in an array
-			for(int k = 0; k < nextPixels.size(); k++){ //iterate over the amount of surrounding pixels
-				if(nextPixels[k].x > 0 && nextPixels[k].x < image.cols - 1 && nextPixels[k].y > 0 && nextPixels[k].y < image.rows - 1 && image.at<uchar>(nextPixels[k]) == 255){ //check if the pixel is white and within bounds, excluding the perimeter
-					line(outputImage, goingToCheck[j], nextPixels[k], cv::Scalar(0, 255, 0), 1); //draw a line from the startpoint to the surrounding pixel
-					validPixels.push_back(nextPixels[k]); //add the surrounding pixel to the array
-					lastPoint = nextPixels[k];  // Update last point found
+    for (const auto& point : points) {
+        std::deque<std::vector<cv::Point>> currentBranches = {{point}};
+        
+		for (int r = 0; r < repetitions; r++) {
+			std::deque<std::vector<cv::Point>> newBranches;
+			for (const auto& branch : currentBranches) {
+			const cv::Point& lastPoint = branch.back();
+			std::vector<cv::Point> nextPixels = getOrderedSurroundingPoints(image, lastPoint, searchRadius, searchPoints);
+
+			for (const auto& nextPoint : nextPixels) {
+				if (nextPoint.x > 0 && nextPoint.x < image.cols - 1 && nextPoint.y > 0 && nextPoint.y < image.rows - 1 && image.at<uchar>(nextPoint) == 255) {
+				if (std::find(branch.begin(), branch.end(), nextPoint) == branch.end()) {
+					if (branch.size() > 1) {
+					double angle = calculateAngle(branch[branch.size() - 2], lastPoint, nextPoint);
+					if (angle < minAngle || angle > maxAngle) {
+						continue; // Skip points that do not meet the angle criteria
+					}
+					}
+					std::vector<cv::Point> newBranch = branch;
+					newBranch.push_back(nextPoint);
+					newBranches.push_back(std::move(newBranch));
+				}
 				}
 			}
-			nextPixels.clear(); //clear the array
+			}
+
+			// Discard branches that aren't promising
+			if (newBranches.size() > 50) {
+			std::nth_element(newBranches.begin(), newBranches.begin() + 50, newBranches.end(), [](const std::vector<cv::Point>& a, const std::vector<cv::Point>& b) {
+				double distanceA = calculateDistance(a.front(), a.back());
+				double distanceB = calculateDistance(b.front(), b.back());
+				return (distanceA / a.size()) > (distanceB / b.size());
+			});
+			newBranches.resize(50);
+			}
+
+			currentBranches = std::move(newBranches);
 		}
-		goingToCheck = validPixels;
-		validPixels.clear();
-	}
-	return {outputImage, lastPoint}; //return the image and the last point
+
+        for (const auto& branch : currentBranches) {
+            if (branch.size() > 1) {
+                branchedPoints.push_back(std::move(branch));
+            }
+        }
+    }
+/*
+    // Filter out branches that are too close to each other
+    std::vector<std::vector<cv::Point>> filteredBranchedPoints;
+    for (const auto& branch : branchedPoints) {
+        bool tooClose = false;
+        for (const auto& filteredBranch : filteredBranchedPoints) {
+            if (calculateDistance(branch.back(), filteredBranch.back()) < searchRadius) {
+                tooClose = true;
+                break;
+            }
+        }
+        if (!tooClose) {
+            filteredBranchedPoints.push_back(branch);
+        }
+    }
+*/
+    return branchedPoints;
+}
+
+
+std::vector<double> checkBranchStraightnessAndLength(const std::vector<std::vector<cv::Point>>& branchedPoints) {
+    std::vector<std::pair<double, double>> branchMetrics; // pair of <length, straightness>
+    std::vector<double> branchGrade;
+
+    for (const auto& branch : branchedPoints) {
+        double totalLength = 0;
+        double totalAngle = 1.0;
+        double upwardScore = 1.0;
+        double straightnessScore = 1.0;
+        double distanceToRoot = 0.0;
+
+        for (size_t i = 1; i < branch.size(); ++i) {
+            totalLength += calculateDistance(branch[i - 1], branch[i]);
+            if (i > 1) {
+                double angle = calculateAngle(branch[i - 2], branch[i - 1], branch[i]);
+                totalAngle += angle;
+                if (angle < M_PI / 4) { // Prefer branches with smaller angles
+                    straightnessScore = straightnessScore * (1/angle);
+                }
+            }
+            if (branch[i].y < branch[i - 1].y) { // Check if the current point is higher up than the previous point
+                upwardScore += 1.0;
+            }
+        }
+
+        distanceToRoot = calculateDistance(branch.front(), branch.back());
+        double averageAngle = (branch.size() > 2) ? totalAngle / (branch.size() - 2) : 0;
+        branchMetrics.push_back(std::make_pair(totalLength, averageAngle));
+
+        double grade = distanceToRoot /  branch.size();
+        branchGrade.push_back(grade);
+        std::cout << "Branch Length: " << totalLength << std::endl;
+        std::cout << "Straightness Score: " << straightnessScore << std::endl;
+        std::cout << "Upward Score: " << upwardScore << std::endl;
+        std::cout << "Distance to Root: " << distanceToRoot << std::endl;
+        std::cout << "Grade: " << grade << std::endl;
+    }
+
+    return branchGrade;
+}
+
+cv::Point drawBranchWithGrade(cv::Mat& image, const std::vector<cv::Point>& branch, double grade, int colorIntensity) {
+    cv::Point lastFoundPoint;
+    for (size_t i = 1; i < branch.size(); ++i) {
+        line(image, branch[i - 1], branch[i], cv::Scalar(0, colorIntensity, 0), 2); // draw the branch
+    }
+    if (!branch.empty()) {
+        cv::putText(image, std::to_string(grade), branch.back(), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1); // add the grade
+        lastFoundPoint = branch[branch.size()-1];
+    }
+    return lastFoundPoint;
 }
 
 cv::Mat convertImage(cv::Mat image, cv::Range cropHeight, cv::Range cropWidth){
@@ -163,17 +276,31 @@ void uart_setup(int &fid) {
     //                 Caution: VMIN and VTIME flags are ignored if O_NONBLOCK flag is set.
     //	    O_NOCTTY - When set and path identifies a terminal device, open() shall not cause the terminal device to become the controlling terminal for the process.fid = open("/dev/ttyTHS1", O_RDWR | O_NOCTTY | O_NDELAY);		//Open in non blocking read/write mode
 
-    fid = open(uart_target, O_RDWR | O_NOCTTY );
-    
-    if (fid == -1)
-    {
-        std::cerr << "Error - Unable to open UART.  Ensure it is not in use by another application\n";
-    }
+    do {
+		fid = open(uart_target, O_RDWR | O_NOCTTY );
+		if (fid == -1) {
+			switch (errno) {
+				case ENOENT:
+					std::cout << "Error: Device not found " << uart_target << std::endl;
+					break;
+				case EACCES:
+					std::cout << "Error: Permission denied" << std::endl;
+					break;
+				case EBUSY:
+					std::cout << "Error: Device busy" << uart_target << std::endl;
+					break;
+				default:
+					std::cout << "Error: Failed to open device " << uart_target << " " << strerror(errno) << std::endl;
+					break;
+			}
+		}
+		usleep(1000000);
+	} while (fid == -1);
 
     tcflush(fid, TCIFLUSH);
     tcflush(fid, TCIOFLUSH);
 
-    usleep(1000);  // 1 sec delay
+    usleep(1000);  // 0.001 sec delay
 
     //------------------------------------------------
     // CONFIGURE THE UART
@@ -234,7 +361,7 @@ bool write_serial(int fid, std::string msg) {
     if (fid != -1)
     {
         int count = write(fid, &tx_buffer[0], (p_tx_buffer - &tx_buffer[0]));		//Filestream, bytes to write, number of bytes to write
-        usleep(1000);   // .001 sec delay
+        //usleep(1000);   // .001 sec delay
         if (count < 0)  return false; // write failed
     }
     return true;
@@ -243,10 +370,13 @@ bool write_serial(int fid, std::string msg) {
 int main()
 {
 	std::cout << "Started line recognition. Running:" << version << std::endl; //print version number please refer to SemVer for versioning
-	cv::Mat cameraCapture, imageUndistorted, foundPath, convertedImage;//create all matrixes
+	cv::Mat cameraCapture, imageUndistorted, foundPath, convertedImage, convertedFullImage;//create all matrixes
     std::vector<cv::Mat> calibrationData =  cameraCalibration("./left%d.png"); //calculates radial distortion which can then be eliminated by calling cv::undistort(<input>, <output>, K, D);
 	cv::Mat K = calibrationData[0]; //get the calibration data
 	cv::Mat D = calibrationData[1]; //get the calibration data
+	
+	cv::Point firstFoundPoint;
+	cv::Point lastFoundPoint;
 
 	//start video capture
 	//cv::VideoCapture input(0, cv::CAP_V4L2);
@@ -256,7 +386,7 @@ int main()
 	std::vector<std::vector<cv::Point>> contours;
 	std::vector<cv::Vec4i> hierachy;
 	std::vector<cv::Point> centers;
-	cv::Point lastFoundPoint;
+	int numBestPaths = 20; // Number of best paths to draw
 	
 	// Setup Serial Communication
 	int fid= -1;
@@ -278,6 +408,7 @@ int main()
 		cv::undistort(cameraCapture, imageUndistorted, K, D); //eliminate radial distortion
 
 		convertedImage = convertImage(imageUndistorted, cv::Range(imageUndistorted.size().height - 50, imageUndistorted.size().height), cv::Range(0, imageUndistorted.size().width));
+		convertedFullImage = convertImage(imageUndistorted, cv::Range(0, imageUndistorted.size().height), cv::Range(0, imageUndistorted.size().width));
 		cv::findContours(convertedImage, contours, hierachy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE, cv::Point(0,imageUndistorted.size().height - 50)); //find contours in the mask
 		
 		for(int i =0; i < contours.size() && contours.size() > 0; i++){//iterate over the amount of contours
@@ -295,39 +426,81 @@ int main()
 		
 		cv::drawContours(imageUndistorted, contours, -1, cv::Scalar(0, 0, 255), 2); //draw the contours to visualize the found line
 				
-		for(int i = 0; i < centers.size(); i++){ //iterate over the amount of center pixels
-			[foundPath, lastFoundPoint] = findPath(pathDepth, searchRadius, centers[i], convertImage(imageUndistorted, cv::Range(0, imageUndistorted.size().height), cv::Range(0, imageUndistorted.size().width)), imageUndistorted); //find the path of the line
-			if(foundPath.empty()){
-				foundPath = imageUndistorted;
+		for (int i = 0; i < centers.size(); i++) { // iterate over the amount of center pixels
+			std::vector<std::vector<cv::Point>> branches = getBranchedPoints({centers[i]}, searchRadius, convertedFullImage, pathDepth);
+			if (branches.empty()) {
+				continue;
 			}
-			// Find the angle between start and end in relation to a vertical line
-			float angle = cv::atan2(centers[i].y - lastFoundPoint.y, centers[i].x - lastFoundPoint.x) / cv::CV_PI;
-			// between 0 and 1 go left, between 1 and 2 go right
-			if (angle >= 0 && angle <= 1 - angleThresh) {
-				std::cout << serial_write(fid, "R2:" << 255-angle*255 << ":L1:" << 255-angle*255 << "\n") << angle << std::endl; // turn left
-			} else if (angle >= 1 + angleThresh && angle <= 2) {
-				std::cout << serial_write(fid, "R1:" << (angle-1)*255 << ":L2:" << angle(-1)*255 << "\n") << angle << std::endl; // turn right
-			} else if (angle > 1 - angleThresh && angle < 1 + angleThresh) {
-				std::cout << serial_write(fid, "R2:" << 255 << ":L2:" << 255 << "\n") << angle << std::endl; // go forward
-			} else {
-				std::cout << "angle: " << angle << std::endl;
+			std::vector<double> branchGrade = checkBranchStraightnessAndLength(branches);
+
+			// Sort branches by grade in descending order
+			std::vector<int> indices(branchGrade.size());
+			for (int j = 0; j < indices.size(); ++j) {
+				indices[j] = j;
 			}
+			std::sort(indices.begin(), indices.end(), [&branchGrade](int a, int b) { return branchGrade[a] > branchGrade[b]; });
+
+			lastFoundPoint = branches[0].back();
+			firstFoundPoint = centers[i];
+			// Draw the top N best branches
+			for (int j = 0; j < std::min(numBestPaths, static_cast<int>(indices.size())); j++) {
+				int idx = indices[j];
+				int colorIntensity = 255 - (j * (255 / numBestPaths)); // Diminishing green tones
+				drawBranchWithGrade(imageUndistorted, branches[idx], branchGrade[idx], colorIntensity);
+			}
+		}
+		// Find the angle between start and end in relation to a vertical line
+		float angle = std::atan2(firstFoundPoint.y - lastFoundPoint.y, firstFoundPoint.x - lastFoundPoint.x) / M_PI;
+		// between 0 and 0.5 go left, between 0.5 and 1 go right
+		if (angle >= 0 && angle <= 0.5 - angleThresh) {
+			std::string writeString = "R2:" + std::to_string(255-angle*255) + "\nL-1:" + std::to_string(255-angle*255) + "\n";
+			std::cout << write_serial(fid, writeString) << angle << std::endl; // turn left
+		} else if (angle >= 0.5 + angleThresh && angle <= 1) {
+			std::string writeString = "R-1:" + std::to_string((angle-1)*255) + "\nL2:" + std::to_string((angle-1)*255) + "\n";
+			std::cout << write_serial(fid, writeString) << angle << std::endl; // turn right
+		} else if (angle > 0.5 - angleThresh && angle < 0.5 + angleThresh) {
+			std::string writeString = "R2:" + std::to_string(255) + "\nL2:" + std::to_string(255) + "\n";
+			std::cout << write_serial(fid, writeString) << angle << std::endl; // go forward
+		} else {
+			std::cout << "angle: " << angle << std::endl;
+		}
+		
+		relativePosition = static_cast<double>(firstFoundPoint.x) / convertedImage.size().width;
+		if (relativePosition < 0.5 - borderThresh)  {
+			//Left motor should be faster to steer right
+			std::string writeString = "R2:" + std::to_string(0.5 + relativePosition * 200 * 2) + "\nL2:" + std::to_string(0.5 - relativePosition * 200 * 2) + "\n";
+			std::cout << write_serial(fid, writeString) << "position: " << relativePosition << std::endl; // turn left
+		} else if (relativePosition > 0.5 + borderThresh)  {
+			//Right motor should be faster to steer left
+			std::string writeString = "R2:" + std::to_string(0.5 - relativePosition * 200 * 2) + "\nL2:" + std::to_string(0.5 + relativePosition * 200 * 2) + "\n";
+			std::cout << write_serial(fid, writeString) << "position: " << relativePosition << std::endl; // turn right
 		}
 
-		if (!imageUndistorted.empty()) {
-			imshow("line full", imageUndistorted);
-		} else {
-			std::cerr << "Error: imageUndistorted is empty" << std::endl;
-		}
 		if (!convertedImage.empty()) {
-			imshow("line", convertedImage);
+			cv::imshow("Converted Image", convertedImage);
 		} else {
 			std::cerr << "Error: convertedImage is empty" << std::endl;
+		}
+		if (!convertedFullImage.empty()) {
+			cv::imshow("Converted Full Image", convertedFullImage);
+		} else {
+			std::cerr << "Error: convertedFullImage is empty" << std::endl;
+		}
+		if (!imageUndistorted.empty()) {
+			cv::imshow("Image Undistorted", imageUndistorted);
+		} else {
+			std::cerr << "Error: imageUndistorted is empty" << std::endl;
 		}
 		cv::waitKey(); //continue when a key is pressed
 			
 		//exit when esc key is pressed
 		char c = cv::waitKey(1);
-		if(c == 27){ break;} //27 = ESC key 
+		if(c == 27){
+			std::string writeString = "R1:" + std::to_string(1) + "\nL1:" + std::to_string(1) + "\n";
+			std::cout << write_serial(fid, writeString) << angle << std::endl; // sttop
+			close(fid);
+			break;
+		} //27 = ESC key
 	}
+
 }
