@@ -10,3 +10,12 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
+build/CMakeCache.txt
+build/CMakeFiles/CMakeError.log
+build/CMakeFiles/CMakeOutput.log
+build/CMakeFiles/Makefile.cmake
+build/CMakeFiles/3.10.2/CMakeCCompiler.cmake
+build/CMakeFiles/3.10.2/CMakeCXXCompiler.cmake
+build/CMakeFiles/undistorted-line-recognition.dir/build.make
+build/CMakeFiles/undistorted-line-recognition.dir/flags.make
+build/CMakeFiles/undistorted-line-recognition.dir/link.txt
