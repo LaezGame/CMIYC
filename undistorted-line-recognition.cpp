@@ -15,6 +15,7 @@ int erodeIterations = 3;
 int dilateIterations = 4;
 int searchRadius = 80;
 int searchPoints = 20;
+std::string version = "0.1.0";
 /////////////////////
 
 std::vector<cv::Point>  findSurroundingPixels(cv::Mat image, cv::Point centerPixel,int radius, int pointAmount){
@@ -84,9 +85,9 @@ void cameraCalibration(std::string path){
 
 int main()
 {
+	std::cout << "Started line recognition. Running:" << version << std::endl; //print version number please refer to SemVer for versioning
 	//create all matrixes
 	cv::Mat cameraCapture, imageUndistorted, imageGrayscale, imageCropped, imageThresholded, imageThresholdedEroded, imageThresholdedDilated, fullImageThresholded;
-
     cameraCalibration("./left%d.png"); //calculates radial distortion which can then be eliminated by calling cv::undistort(<input>, <output>, K, D);
 
 	//start video capture
