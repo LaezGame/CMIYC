@@ -7,196 +7,193 @@
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/opencv.hpp>
 #include <math.h>
-//#include <stdexcept>
+#include <stdexcept>
 
-//////variables//////
-int whiteblackthreshold = 50;
-int pathDepth = 2;
-int erodeIterations = 3;
-int dilateIterations = 4;
-int searchRadius = 120;
-int searchPoints = 15;
-std::string version = "0.1.1";
-/////////////////////
+// Constants
+const int WHITE_BLACK_THRESHOLD = 50;
+const int PATH_DEPTH = 2;
+const int ERODE_ITERATIONS = 3;
+const int DILATE_ITERATIONS = 4;
+const int SEARCH_RADIUS = 120;
+const int SEARCH_POINTS = 15;
+const std::string VERSION = "0.1.1";
 
-std::vector<cv::Point>  findSurroundingPixels(cv::Mat image, cv::Point centerPixel,int radius, int pointAmount){
-// Finds a circle of pixels around a center pixel. Returns an array of the resulting pixels
-// image: the image to search in. Used to check if the pixel is in image bounds
-// centerPixel: the central pixel around which the circle is drawn
-// radius: the radius of the circle
-// pointAmount: the amount of points on the circle
-
-	std::vector<cv::Point> points; //create array to store the points
-	for(int i = 0; i < pointAmount; i++){ //iterate over the amount of points
-		double angle = 2.0*M_PI*i/pointAmount; //calculate the angle of the point
-		cv::Point point(centerPixel.x + radius * sin(angle),centerPixel.y - radius * cos(angle)); //calculate the point
-		if((point.x <= image.size().width && point.x >= 0) && (point.y <= image.size().height && point.y >= 0)){ //check if the point is in the image bounds
-			points.push_back(point); //add the point to the array
-		}
-	}
-	return points; //return the array
+// Function to find surrounding pixels
+std::vector<cv::Point> findSurroundingPixels(const cv::Mat& image, const cv::Point& centerPixel, int radius, int pointAmount) {
+    std::vector<cv::Point> points;
+    for (int i = 0; i < pointAmount; ++i) {
+        double angle = 2.0 * M_PI * i / pointAmount;
+        cv::Point point(centerPixel.x + radius * sin(angle), centerPixel.y - radius * cos(angle));
+        if (point.x >= 0 && point.x < image.cols && point.y >= 0 && point.y < image.rows) {
+            points.push_back(point);
+        }
+    }
+    return points;
 }
 
-void drawScanFlower(cv::Mat image, std::vector<cv::Point> centers){
-// Draws a pattern of lines and a circle of dots around a center pixel
-// image: the image to draw on
-// centers: the center pixels around which the pattern is drawn
-
-	for(int j = 0; j < centers.size(); j++){ //iterate over the amount of center pixels
-		std::vector<cv::Point> nextPixels = findSurroundingPixels(image, centers[j], searchRadius, searchPoints); //find the surrounding pixels and store them in an array
-		for(int i = 0; i < nextPixels.size(); i++){ //iterate over the amount of surrounding pixels
-			line(image, centers[j], nextPixels[i], cv::Scalar(255, 255, 255), 1); //draw a line from the center pixel to the surrounding pixel
-			circle(image, nextPixels[i], 2, cv::Scalar(255, 0, 0), -1); //draw a dot at the surrounding pixel
-		}
-	}
+// Function to draw scan flower
+void drawScanFlower(cv::Mat& image, const std::vector<cv::Point>& centers) {
+    for (const auto& center : centers) {
+        std::vector<cv::Point> nextPixels = findSurroundingPixels(image, center, SEARCH_RADIUS, SEARCH_POINTS);
+        for (const auto& point : nextPixels) {
+            cv::line(image, center, point, cv::Scalar(255, 255, 255), 1);
+            cv::circle(image, point, 2, cv::Scalar(255, 0, 0), -1);
+        }
+    }
 }
 
-std::vector<cv::Mat> cameraCalibration(std::string path){
-//calculates radial distortion which can then be eliminated by calling cv::undistort(<input>, <output>, K, D);
-//got this from here https://www.youtube.com/watch?v=FGqG1P36xxo&list=PL5B692fm6--ufBviUGK3hlwL1hVSyorZx&index=8
-//path: the path to the calibration images
-
-	cv::Mat image, image_gray, K, D; //create necessary matrixes
-	std::vector<cv::Mat> Rs, Ts; //create necessary matrixes
-	cv::VideoCapture calib(path); //load calibration images
+// Function for camera calibration
+std::vector<cv::Mat> cameraCalibration(const std::string& path) {
+    cv::Mat image, image_gray, K, D;
+    std::vector<cv::Mat> Rs, Ts;
+    cv::VideoCapture calib(path);
+    if (!calib.isOpened()) {
+        throw std::runtime_error("Error: Unable to open calibration video file.");
+    }
     std::vector<cv::Point2f> corners_image;
-    std::vector< std::vector<cv::Point2f> > points_image;
+    std::vector<std::vector<cv::Point2f>> points_image;
     cv::Size pattern_size(8, 6);
-	std::vector<cv::Mat> calibrationData; //create necessary matrixes
-    for (;;){ //iterate over all calibration images
-		if (!calib.read(image)){break;}	//check if any calibration images are left
+    std::vector<cv::Mat> calibrationData;
 
-		cv::cvtColor(image, image_gray, cv::COLOR_BGR2GRAY); //convert all calibration images to grayscale
-		bool found = cv::findChessboardCorners(image_gray, pattern_size, corners_image); //search for chessboard pattern
-		if (found){ //if found, draw chessboard corners
-			cv::drawChessboardCorners(image, pattern_size, corners_image, found);
-			points_image.push_back(corners_image); //store the corners
-		}
+    while (calib.read(image)) {
+        cv::cvtColor(image, image_gray, cv::COLOR_BGR2GRAY);
+        bool found = cv::findChessboardCorners(image_gray, pattern_size, corners_image);
+        if (found) {
+            cv::drawChessboardCorners(image, pattern_size, corners_image, found);
+            points_image.push_back(corners_image);
+        }
     }
-	//do some math the indian guy told me to do
-    std::vector< cv::Point3f > corners_world; //create necessary matrixes
-    for(int i = 0; i < pattern_size.height; i++){ //iterate over the chessboard pattern
-		for(int j = 0; j < pattern_size.width; j++){ //iterate over the chessboard pattern
-			corners_world.push_back(cv::Point3f(j, i, 0)); //store the corners
-		}
+
+    if (points_image.empty()) {
+        throw std::runtime_error("Error: No chessboard corners found in calibration images.");
     }
-    std::vector< std::vector<cv::Point3f> > points_world(points_image.size(), corners_world); //store the corners
-    double rms = cv::calibrateCamera(points_world, points_image, image_gray.size(), K, D, Rs, Ts); //calibrate the camera with the resulting data
-	std::cout << "Reprojection error: " << rms << std::endl;  //print reprojection error. closer to 1 = better calibration. note to self: take some better pictures
-	calibrationData.push_back(K); //store the calibration data
-	calibrationData.push_back(D); //store the calibration data
-	return calibrationData; //return the calibration data
+
+    std::vector<cv::Point3f> corners_world;
+    for (int i = 0; i < pattern_size.height; ++i) {
+        for (int j = 0; j < pattern_size.width; ++j) {
+            corners_world.push_back(cv::Point3f(j, i, 0));
+        }
+    }
+
+    std::vector<std::vector<cv::Point3f>> points_world(points_image.size(), corners_world);
+    double rms = cv::calibrateCamera(points_world, points_image, image_gray.size(), K, D, Rs, Ts);
+    std::cout << "Reprojection error: " << rms << std::endl;
+
+    calibrationData.push_back(K);
+    calibrationData.push_back(D);
+    return calibrationData;
 }
 
-cv::Mat findPath(int repetitions, int searchRadius, cv::Point startpoint, cv::Mat image, cv::Mat outputImage){
-	std::vector<cv::Point> nextPixels; //find the surrounding pixels and store them in an array
-	std::vector<cv::Point> validPixels, goingToCheck, homePoint;
-	homePoint.push_back(startpoint);
+// Function to find path
+cv::Mat findPath(int repetitions, int searchRadius, const cv::Point& startpoint, const cv::Mat& image, cv::Mat& outputImage) {
+    std::vector<cv::Point> nextPixels = findSurroundingPixels(image, startpoint, searchRadius, SEARCH_POINTS);
+    std::vector<cv::Point> validPixels, goingToCheck = {startpoint};
 
-	nextPixels = findSurroundingPixels(image, startpoint, searchRadius, searchPoints);
+    for (const auto& point : nextPixels) {
+        if (point.x > 0 && point.x < image.cols - 1 && point.y > 0 && point.y < image.rows - 1 && image.at<uchar>(point) == 255) {
+            cv::line(outputImage, startpoint, point, cv::Scalar(0, 255, 0), 1);
+            goingToCheck.push_back(point);
+        }
+    }
 
-	for (int i = 0; i < searchPoints; i++){ //iterate over the amount of surrounding pixels
-		if(nextPixels[i].x > 0 && nextPixels[i].x < image.cols - 1 && nextPixels[i].y > 0 && nextPixels[i].y < image.rows - 1 && image.at<uchar>(nextPixels[i]) == 255){ //check if the pixel is white and within bounds, excluding the perimeter
-			line(outputImage, startpoint, nextPixels[i], cv::Scalar(0, 255, 0), 1); //draw a line from the startpoint to the surrounding pixel
-			goingToCheck.push_back(nextPixels[i]); //add the surrounding pixel to the array
-		}
-	}
-
-	for(int i = 0; i < repetitions; i++){ //iterate over the amount of repetitions
-		for(int j = 0; j < goingToCheck.size(); j++){
-			nextPixels = findSurroundingPixels(image, goingToCheck[j], searchRadius, searchPoints); //find the surrounding pixels and store them in an array
-			for(int k = 0; k < nextPixels.size(); k++){ //iterate over the amount of surrounding pixels
-				if(nextPixels[k].x > 0 && nextPixels[k].x < image.cols - 1 && nextPixels[k].y > 0 && nextPixels[k].y < image.rows - 1 && image.at<uchar>(nextPixels[k]) == 255){ //check if the pixel is white and within bounds, excluding the perimeter
-					line(outputImage, goingToCheck[j], nextPixels[k], cv::Scalar(0, 255, 0), 1); //draw a line from the startpoint to the surrounding pixel
-					validPixels.push_back(nextPixels[k]); //add the surrounding pixel to the array
-				}
-			}
-			nextPixels.clear(); //clear the array
-		}
-		goingToCheck = validPixels;
-		validPixels.clear();
-	}
-	return outputImage; //return the image
+    for (int i = 0; i < repetitions; ++i) {
+        for (const auto& checkPoint : goingToCheck) {
+            nextPixels = findSurroundingPixels(image, checkPoint, searchRadius, SEARCH_POINTS);
+            for (const auto& point : nextPixels) {
+                if (point.x > 0 && point.x < image.cols - 1 && point.y > 0 && point.y < image.rows - 1 && image.at<uchar>(point) == 255) {
+                    cv::line(outputImage, checkPoint, point, cv::Scalar(0, 255, 0), 1);
+                    validPixels.push_back(point);
+                }
+            }
+        }
+        goingToCheck = validPixels;
+        validPixels.clear();
+    }
+    return outputImage;
 }
 
-cv::Mat convertImage(cv::Mat image, cv::Range cropHeight, cv::Range cropWidth){
-	cv::Mat image_gray, image_thresholded, image_thresholded_eroded, image_thresholded_dilated;
+// Function to convert image
+cv::Mat convertImage(cv::Mat image, const cv::Range& cropHeight, const cv::Range& cropWidth) {
+    cv::Mat image_gray, image_thresholded, image_thresholded_eroded, image_thresholded_dilated;
 
-	image = image(cropHeight, cropWidth);
-
-	cv::cvtColor(image, image_gray, cv::COLOR_BGR2GRAY); //convert to grayscale
-	cv::threshold(image_gray, image_thresholded, whiteblackthreshold, 255, cv::THRESH_BINARY_INV); //threshold the image to mask black parts of the image
-	cv::erode(image_thresholded, image_thresholded_eroded, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(10,10), cv::Point(-1, -1)), cv::Point(-1, -1), erodeIterations, cv::BORDER_DEFAULT); //erode the mask to remove noise
-	cv::dilate(image_thresholded_eroded, image_thresholded_dilated, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(10,10), cv::Point(-1, -1)), cv::Point(-1, -1), dilateIterations, cv::BORDER_DEFAULT); //dilate the mask to remove noise
-	return image_thresholded_dilated;
+    image = image(cropHeight, cropWidth);
+    cv::cvtColor(image, image_gray, cv::COLOR_BGR2GRAY);
+    cv::threshold(image_gray, image_thresholded, WHITE_BLACK_THRESHOLD, 255, cv::THRESH_BINARY_INV);
+    cv::erode(image_thresholded, image_thresholded_eroded, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(10, 10)), cv::Point(-1, -1), ERODE_ITERATIONS);
+    cv::dilate(image_thresholded_eroded, image_thresholded_dilated, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(10, 10)), cv::Point(-1, -1), DILATE_ITERATIONS);
+    return image_thresholded_dilated;
 }
 
-int main()
-{
-	std::cout << "Started line recognition. Running:" << version << std::endl; //print version number please refer to SemVer for versioning
-	cv::Mat cameraCapture, imageUndistorted, foundPath, convertedImage;//create all matrixes
-    std::vector<cv::Mat> calibrationData =  cameraCalibration("./left%d.png"); //calculates radial distortion which can then be eliminated by calling cv::undistort(<input>, <output>, K, D);
-	cv::Mat K = calibrationData[0]; //get the calibration data
-	cv::Mat D = calibrationData[1]; //get the calibration data
+// Function to process frame
+void processFrame(const cv::Mat& cameraCapture, const cv::Mat& K, const cv::Mat& D) {
+    cv::Mat imageUndistorted, convertedImage, foundPath;
+    std::vector<std::vector<cv::Point>> contours;
+    std::vector<cv::Vec4i> hierarchy;
+    std::vector<cv::Point> centers;
 
-	//start video capture
-	//cv::VideoCapture input(0, cv::CAP_V4L2);
-    //cv::VideoCapture set(cv::CAP_PROP_FPS, 120);
-    cv::VideoCapture input("/home/jetson/Desktop/TestImages/testImage%d.png");
-	
-	std::vector<std::vector<cv::Point>> contours;
-	std::vector<cv::Vec4i> hierachy;
-	std::vector<cv::Point> centers;
-	
-	for(;;){
-		if(!input.read(cameraCapture)){
-			//throw std::invalid_argument("no camera image available"); //TODO: write some functioning error handling
-			break;
-		}
-		centers.clear();
+    cv::undistort(cameraCapture, imageUndistorted, K, D);
+    convertedImage = convertImage(imageUndistorted, cv::Range(imageUndistorted.rows - 50, imageUndistorted.rows), cv::Range(0, imageUndistorted.cols));
+    cv::findContours(convertedImage, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE, cv::Point(0, imageUndistorted.rows - 50));
 
-		
-		cv::undistort(cameraCapture, imageUndistorted, K, D); //eliminate radial distortion
+    for (const auto& contour : contours) {
+        cv::Moments M = cv::moments(contour);
+        if (M.m00 != 0) {
+            cv::Point2f center(M.m10 / M.m00, M.m01 / M.m00);
+            centers.push_back(center);
+            cv::circle(imageUndistorted, center, 5, cv::Scalar(100, 0, 250), -1);
+        }
+    }
 
-		convertedImage = convertImage(imageUndistorted, cv::Range(imageUndistorted.size().height - 50, imageUndistorted.size().height), cv::Range(0, imageUndistorted.size().width));
-		cv::findContours(convertedImage, contours, hierachy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE, cv::Point(0,imageUndistorted.size().height - 50)); //find contours in the mask
-		
-		for(int i =0; i < contours.size() && contours.size() > 0; i++){//iterate over the amount of contours
-			cv::Point2f center; //create a point to store the center of the contour
-			cv::Moments M = cv::moments(contours[i]); //calculate the moments of the contour
-			if(M.m00 != 0){ //check if M.m00 is not 0 to avoid division by 0
-				center.x = M.m10/M.m00;
-				center.y = M.m01/M.m00;
-				centers.push_back(center);
-				cv::circle(imageUndistorted, center, 5, cv::Scalar(100, 0, 250), -1); //draw a circle at the center of the contour
-			}
-		}
+    drawScanFlower(imageUndistorted, centers);
+    cv::drawContours(imageUndistorted, contours, -1, cv::Scalar(0, 0, 255), 2);
 
-		drawScanFlower(imageUndistorted, centers);
-		
-		cv::drawContours(imageUndistorted, contours, -1, cv::Scalar(0, 0, 255), 2); //draw the contours to visualize the found line
-				
-		for(int i = 0; i < centers.size(); i++){ //iterate over the amount of center pixels
-			foundPath = findPath(pathDepth, searchRadius, centers[i], convertImage(imageUndistorted, cv::Range(0, imageUndistorted.size().height), cv::Range(0, imageUndistorted.size().width)), imageUndistorted); //find the path of the line
-			if(foundPath.empty()){
-				foundPath = imageUndistorted;
-			}
-		}
+    for (const auto& center : centers) {
+        foundPath = findPath(PATH_DEPTH, SEARCH_RADIUS, center, convertImage(imageUndistorted, cv::Range(0, imageUndistorted.rows), cv::Range(0, imageUndistorted.cols)), imageUndistorted);
+        if (foundPath.empty()) {
+            foundPath = imageUndistorted;
+        }
+    }
 
-		if (!imageUndistorted.empty()) {
-			imshow("line full", imageUndistorted);
-		} else {
-			std::cerr << "Error: imageUndistorted is empty" << std::endl;
-		}
-		if (!convertedImage.empty()) {
-			imshow("line", convertedImage);
-		} else {
-			std::cerr << "Error: convertedImage is empty" << std::endl;
-		}
-		cv::waitKey(); //continue when a key is pressed
-			
-		//exit when esc key is pressed
-		char c = cv::waitKey(1);
-		if(c == 27){ break;} //27 = ESC key 
-	}
+    if (!imageUndistorted.empty()) {
+        cv::imshow("line full", imageUndistorted);
+    } else {
+        std::cerr << "Error: imageUndistorted is empty" << std::endl;
+    }
+    if (!convertedImage.empty()) {
+        cv::imshow("line", convertedImage);
+    } else {
+        std::cerr << "Error: convertedImage is empty" << std::endl;
+    }
+}
+
+int main() {
+    try {
+        std::cout << "Started line recognition. Running: " << VERSION << std::endl;
+        std::vector<cv::Mat> calibrationData = cameraCalibration("./left%d.png");
+        cv::Mat K = calibrationData[0];
+        cv::Mat D = calibrationData[1];
+
+        cv::VideoCapture input("/home/jetson/Desktop/TestImages/testImage%d.png");
+        if (!input.isOpened()) {
+            throw std::runtime_error("Error: Unable to open video file.");
+        }
+
+        while (true) {
+            cv::Mat cameraCapture;
+            if (!input.read(cameraCapture)) {
+                std::cerr << "Error: Unable to read frame from video file." << std::endl;
+                break;
+            }
+
+            processFrame(cameraCapture, K, D);
+
+            if (cv::waitKey(1) == 27) { // 27 = ESC key
+                break;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
