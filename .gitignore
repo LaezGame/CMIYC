@@ -20,3 +20,5 @@ build/CMakeFiles/undistorted-line-recognition.dir/build.make
 build/CMakeFiles/undistorted-line-recognition.dir/flags.make
 build/CMakeFiles/undistorted-line-recognition.dir/link.txt
 .stfolder/syncthing-folder-e1fb00.txt
+.stignore
+/.vscode
