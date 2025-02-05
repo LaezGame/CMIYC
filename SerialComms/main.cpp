@@ -3,31 +3,44 @@
 #include <sys/fcntl.h>    // Used for UART
 #include <termios.h>      // Used for UART
 #include <string>
+#include <cstring>
 
 using namespace std;
 
 // Define Constants
-const char *uart_target = "/dev/ttyACM0";
+const char *uart_target = "/dev/ttyUSB0";
 #define     NSERIAL_CHAR   256
 #define     VMINX          13
 #define     BAUDRATE       B115200
 
+// Define methods
+void uart_setup(int &fid);
+bool write_serial(int &fid, string msg);
+string read_serial(int &fid, int message_length);
+
 int main()
 {
     int fid= -1;
+    
+    uart_setup(fid);
+    
+    if (fid == -1)
+    {
+        printf("Error - Unable to open UART.  Ensure it is not in use by another application\n");
+    }
 
     usleep(500000);   // 0.5 sec delay
 
-    write_serial(fid, "Hello from Nano\n");
+    write_serial(fid, "S\n");
 
     usleep(1000000);  // 1 sec delay
 
-    read_serial(fid, VMINX);
+    printf(read_serial(fid, VMINX).c_str());
 
     close(fid);
 }
 
-void uart_setup(int fid) {
+void uart_setup(int &fid) {
     // SETUP SERIAL WORLD
     struct termios  port_options;   // Create the structure
 
@@ -50,16 +63,16 @@ void uart_setup(int fid) {
     //	    O_NOCTTY - When set and path identifies a terminal device, open() shall not cause the terminal device to become the controlling terminal for the process.fid = open("/dev/ttyTHS1", O_RDWR | O_NOCTTY | O_NDELAY);		//Open in non blocking read/write mode
 
     fid = open(uart_target, O_RDWR | O_NOCTTY );
+    
+    if (fid == -1)
+    {
+        perror("Error - Unable to open UART.  Ensure it is not in use by another application\n");
+    }
 
     tcflush(fid, TCIFLUSH);
     tcflush(fid, TCIOFLUSH);
 
     usleep(1000);  // 1 sec delay
-
-    if (fid == -1)
-    {
-        printf("Error - Unable to open UART.  Ensure it is not in use by another application\n");
-    }
 
     //------------------------------------------------
     // CONFIGURE THE UART
@@ -77,7 +90,7 @@ void uart_setup(int fid) {
     //	PARENB - Parity enable
     //	PARODD - Odd parity (else even)
 
-    port_options.c_cflag |= PARENB;            // Enables the Parity Enable bit(PARENB)
+    port_options.c_cflag &= ~PARENB;            // Disables the Parity Enable bit(PARENB)
     port_options.c_cflag &= ~CSTOPB;            // CSTOPB = 2 Stop bits,here it is cleared so 1 Stop bit
     port_options.c_cflag &= ~CSIZE;	            // Clears the mask for setting the data size
     port_options.c_cflag |=  CS8;               // Set the data bits = 8
@@ -90,7 +103,7 @@ void uart_setup(int fid) {
     port_options.c_lflag = 0;               //  enable raw input instead of canonical,
 
     port_options.c_cc[VMIN]  = VMINX;       // Read at least 1 character
-    port_options.c_cc[VTIME] = 0;           // Wait indefinetly
+    port_options.c_cc[VTIME] = 10;           // Wait one second
 
     cfsetispeed(&port_options,BAUDRATE);    // Set Read  Speed
     cfsetospeed(&port_options,BAUDRATE);    // Set Write Speed
@@ -107,8 +120,8 @@ void uart_setup(int fid) {
     tcflush(fid, TCIOFLUSH);
 }
 
-bool write_serial(int fid, std::string msg) {
-    unsigned char tx_buffer[20];
+bool write_serial(int &fid, string msg) {
+    unsigned char tx_buffer[msg.size()];
     unsigned char *p_tx_buffer;
 
     p_tx_buffer = &tx_buffer[0];
@@ -126,9 +139,9 @@ bool write_serial(int fid, std::string msg) {
     return true;
 }
 
-unsigned char* read_serial(int fid, int message_length) {
-    unsigned char rx_buffer[message_length];
-    unsigned char serial_message[NSERIAL_CHAR];
+string read_serial(int &fid, int message_length) {
+    char rx_buffer[message_length];
+    string serial_message;
     bool          pickup = true;
     int           rx_length;
     int           nread = 0;
@@ -138,6 +151,7 @@ unsigned char* read_serial(int fid, int message_length) {
     usleep(1000);   // .001 sec delay
 
     // Now ready to recieve message
+    serial_message.reserve(message_length);
 
     while (pickup && fid != -1) {
         int rx_length = read(fid, (void*)rx_buffer, message_length);
@@ -146,8 +160,8 @@ unsigned char* read_serial(int fid, int message_length) {
             for (int i = 0; i < rx_length; i++) {
                 if (nread < NSERIAL_CHAR - 1) {
                     // Append each byte to the message buffer
-                    serial_message[nread++] = rx_buffer[i];
-                    serial_message[nread] = '\0';  // Null-terminate the string
+                    serial_message += rx_buffer[i];
+                    nread++;
 
                     // Check for terminator, newline
                     if (rx_buffer[i] == '\n') {
