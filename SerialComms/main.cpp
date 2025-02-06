@@ -4,19 +4,21 @@
 #include <termios.h>      // Used for UART
 #include <string>
 #include <cstring>
+#include <iostream>
+#include <errno.h>
 
-using namespace std;
 
 // Define Constants
 const char *uart_target = "/dev/ttyUSB0";
 #define     NSERIAL_CHAR   256
-#define     VMINX          13
-#define     BAUDRATE       B115200
+#define     VMINX          1
+#define     MSG_LEN        6
+#define     BAUDRATE       B9600
 
 // Define methods
 void uart_setup(int &fid);
-bool write_serial(int &fid, string msg);
-string read_serial(int &fid, int message_length);
+bool write_serial(int fid, std::string msg);
+std::string read_serial(int fid, int message_length);
 
 int main()
 {
@@ -26,16 +28,23 @@ int main()
     
     if (fid == -1)
     {
-        printf("Error - Unable to open UART.  Ensure it is not in use by another application\n");
+        std::cout << "Error - Unable to open UART.  Ensure it is not in use by another application\n";
     }
 
     usleep(500000);   // 0.5 sec delay
 
-    write_serial(fid, "S\n");
+    std::cout << write_serial(fid, "S\n") << std::endl;
 
     usleep(1000000);  // 1 sec delay
+    
+    std::string input;
 
-    printf(read_serial(fid, VMINX).c_str());
+    while(true) {
+		input = read_serial(fid, MSG_LEN);
+		if (input.size() == MSG_LEN) {
+			std::cout << input << std::endl;
+		}
+	}
 
     close(fid);
 }
@@ -66,7 +75,7 @@ void uart_setup(int &fid) {
     
     if (fid == -1)
     {
-        perror("Error - Unable to open UART.  Ensure it is not in use by another application\n");
+        std::cerr << "Error - Unable to open UART.  Ensure it is not in use by another application\n";
     }
 
     tcflush(fid, TCIFLUSH);
@@ -112,7 +121,7 @@ void uart_setup(int &fid) {
     int att = tcsetattr(fid, TCSANOW, &port_options);
 
     if (att != 0 ) {
-        printf("\nERROR in Setting port attributes");
+        std::cout << "\nERROR in Setting port attributes" << std::endl;
     }
 
     // Flush Buffers
@@ -120,7 +129,7 @@ void uart_setup(int &fid) {
     tcflush(fid, TCIOFLUSH);
 }
 
-bool write_serial(int &fid, string msg) {
+bool write_serial(int fid, std::string msg) {
     unsigned char tx_buffer[msg.size()];
     unsigned char *p_tx_buffer;
 
@@ -139,9 +148,9 @@ bool write_serial(int &fid, string msg) {
     return true;
 }
 
-string read_serial(int &fid, int message_length) {
+std::string read_serial(int fid, int message_length) {
     char rx_buffer[message_length];
-    string serial_message;
+    std::string serial_message;
     bool          pickup = true;
     int           rx_length;
     int           nread = 0;
@@ -155,7 +164,30 @@ string read_serial(int &fid, int message_length) {
 
     while (pickup && fid != -1) {
         int rx_length = read(fid, (void*)rx_buffer, message_length);
-
+		
+		if (rx_length == -1) {
+			std::cerr << "Read error: " << strerror(errno) << std::endl;
+			switch (errno) {
+				case EAGAIN:
+					std::cerr << "The file descriptor is set to non-blocking and no data is available." << std::endl;
+					break;
+				case EBADF:
+					std::cerr << "The file descriptor is not valid or not open for reading." << std::endl;
+					break;
+				case EFAULT:
+					std::cerr << "Buffer points to an invalid memory location." << std::endl;
+					break;
+				case EINTR:
+					std::cerr << "The call was interrupted by a signal before any data was read." << std::endl;
+					break;
+				case EIO:
+					std::cerr << "I/O error occurred." << std::endl;
+					break;
+				default:
+					std::cerr << "Unknown error occurred." << std::endl;
+			}
+		}
+		
         if (rx_length > 0) {
             for (int i = 0; i < rx_length; i++) {
                 if (nread < NSERIAL_CHAR - 1) {
@@ -170,7 +202,7 @@ string read_serial(int &fid, int message_length) {
                     }
                 } else {
                     // Buffer overflow, stop collecting data
-                    printf("Buffer overflow detected! Message too long.\n");
+                    std::cout << "Buffer overflow detected! Message too long.\n" << std::endl;
                     pickup = false;
                     break;
                 }
