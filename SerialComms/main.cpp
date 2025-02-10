@@ -7,18 +7,23 @@
 #include <iostream>
 #include <errno.h>
 
-
 // Define Constants
 const char *uart_target = "/dev/ttyUSB0";
 #define     NSERIAL_CHAR   256
 #define     VMINX          1
-#define     MSG_LEN        6
+#define     MSG_LEN        15
 #define     BAUDRATE       B9600
 
 // Define methods
 void uart_setup(int &fid);
 bool write_serial(int fid, std::string msg);
 std::string read_serial(int fid, int message_length);
+
+/*
+ * Communication Format:
+ * Jetson -> Teensy "Left Motor Status:Left Motor Speed:Right Motor Status:Right Motor Speed"; ex.: "1:200:0:000\n"
+ */
+
 
 int main()
 {
@@ -32,18 +37,18 @@ int main()
     }
 
     usleep(500000);   // 0.5 sec delay
-
-    std::cout << write_serial(fid, "S\n") << std::endl;
-
-    usleep(1000000);  // 1 sec delay
     
     std::string input;
 
     while(true) {
-		input = read_serial(fid, MSG_LEN);
+        std::cout << write_serial(fid, "1:200:2:001\n") << std::endl;
+
+        usleep(500000);  // 0.5 sec delay
+        
+		/*input = read_serial(fid, MSG_LEN);
 		if (input.size() == MSG_LEN) {
 			std::cout << input << std::endl;
-		}
+		}*/
 	}
 
     close(fid);
