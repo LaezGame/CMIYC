@@ -7,6 +7,12 @@
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/opencv.hpp>
 #include <math.h>
+#include <unistd.h>       // Used for UART
+#include <sys/fcntl.h>    // Used for UART
+#include <termios.h>      // Used for UART
+#include <string>
+#include <cstring>
+#include <errno.h>
 //#include <stdexcept>
 
 //////variables//////
@@ -17,6 +23,7 @@ int dilateIterations = 4;
 int searchRadius = 120;
 int searchPoints = 15;
 std::string version = "0.1.1";
+float angleThresh = 0.1;
 /////////////////////
 
 std::vector<cv::Point>  findSurroundingPixels(cv::Mat image, cv::Point centerPixel,int radius, int pointAmount){
@@ -88,9 +95,10 @@ std::vector<cv::Mat> cameraCalibration(std::string path){
 	return calibrationData; //return the calibration data
 }
 
-cv::Mat findPath(int repetitions, int searchRadius, cv::Point startpoint, cv::Mat image, cv::Mat outputImage){
+std::Pair<cv::Mat, cv::Point> findPath(int repetitions, int searchRadius, cv::Point startpoint, cv::Mat image, cv::Mat outputImage){
 	std::vector<cv::Point> nextPixels; //find the surrounding pixels and store them in an array
 	std::vector<cv::Point> validPixels, goingToCheck, homePoint;
+	cv::Point lastPoint = startpoint;
 	homePoint.push_back(startpoint);
 
 	nextPixels = findSurroundingPixels(image, startpoint, searchRadius, searchPoints);
@@ -99,6 +107,7 @@ cv::Mat findPath(int repetitions, int searchRadius, cv::Point startpoint, cv::Ma
 		if(nextPixels[i].x > 0 && nextPixels[i].x < image.cols - 1 && nextPixels[i].y > 0 && nextPixels[i].y < image.rows - 1 && image.at<uchar>(nextPixels[i]) == 255){ //check if the pixel is white and within bounds, excluding the perimeter
 			line(outputImage, startpoint, nextPixels[i], cv::Scalar(0, 255, 0), 1); //draw a line from the startpoint to the surrounding pixel
 			goingToCheck.push_back(nextPixels[i]); //add the surrounding pixel to the array
+			lastPoint = nextPixels[i];  // Update last point found
 		}
 	}
 
@@ -109,6 +118,7 @@ cv::Mat findPath(int repetitions, int searchRadius, cv::Point startpoint, cv::Ma
 				if(nextPixels[k].x > 0 && nextPixels[k].x < image.cols - 1 && nextPixels[k].y > 0 && nextPixels[k].y < image.rows - 1 && image.at<uchar>(nextPixels[k]) == 255){ //check if the pixel is white and within bounds, excluding the perimeter
 					line(outputImage, goingToCheck[j], nextPixels[k], cv::Scalar(0, 255, 0), 1); //draw a line from the startpoint to the surrounding pixel
 					validPixels.push_back(nextPixels[k]); //add the surrounding pixel to the array
+					lastPoint = nextPixels[k];  // Update last point found
 				}
 			}
 			nextPixels.clear(); //clear the array
@@ -116,7 +126,7 @@ cv::Mat findPath(int repetitions, int searchRadius, cv::Point startpoint, cv::Ma
 		goingToCheck = validPixels;
 		validPixels.clear();
 	}
-	return outputImage; //return the image
+	return {outputImage, lastPoint}; //return the image and the last point
 }
 
 cv::Mat convertImage(cv::Mat image, cv::Range cropHeight, cv::Range cropWidth){
@@ -129,6 +139,105 @@ cv::Mat convertImage(cv::Mat image, cv::Range cropHeight, cv::Range cropWidth){
 	cv::erode(image_thresholded, image_thresholded_eroded, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(10,10), cv::Point(-1, -1)), cv::Point(-1, -1), erodeIterations, cv::BORDER_DEFAULT); //erode the mask to remove noise
 	cv::dilate(image_thresholded_eroded, image_thresholded_dilated, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(10,10), cv::Point(-1, -1)), cv::Point(-1, -1), dilateIterations, cv::BORDER_DEFAULT); //dilate the mask to remove noise
 	return image_thresholded_dilated;
+}
+
+void uart_setup(int &fid) {
+    // SETUP SERIAL WORLD
+    struct termios  port_options;   // Create the structure
+
+    tcgetattr(fid, &port_options);	// Get the current attributes of the Serial port
+
+
+    //------------------------------------------------
+    //  OPEN THE UART
+    //------------------------------------------------
+    // The flags (defined in fcntl.h):
+    //	Access modes (use 1 of these):
+    //		O_RDONLY - Open for reading only.
+    //		O_RDWR   - Open for reading and writing.
+    //		O_WRONLY - Open for writing only.
+    //	    O_NDELAY / O_NONBLOCK (same function)
+    //               - Enables nonblocking mode. When set read requests on the file can return immediately with a failure status
+    //                 if there is no input immediately available (instead of blocking). Likewise, write requests can also return
+    //				   immediately with a failure status if the output can't be written immediately.
+    //                 Caution: VMIN and VTIME flags are ignored if O_NONBLOCK flag is set.
+    //	    O_NOCTTY - When set and path identifies a terminal device, open() shall not cause the terminal device to become the controlling terminal for the process.fid = open("/dev/ttyTHS1", O_RDWR | O_NOCTTY | O_NDELAY);		//Open in non blocking read/write mode
+
+    fid = open(uart_target, O_RDWR | O_NOCTTY );
+    
+    if (fid == -1)
+    {
+        std::cerr << "Error - Unable to open UART.  Ensure it is not in use by another application\n";
+    }
+
+    tcflush(fid, TCIFLUSH);
+    tcflush(fid, TCIOFLUSH);
+
+    usleep(1000);  // 1 sec delay
+
+    //------------------------------------------------
+    // CONFIGURE THE UART
+    //------------------------------------------------
+    // flags defined in /usr/include/termios.h - see http://pubs.opengroup.org/onlinepubs/007908799/xsh/termios.h.html
+    //	Baud rate:
+    //         - B1200, B2400, B4800, B9600, B19200, B38400, B57600, B115200,
+    //           B230400, B460800, B500000, B576000, B921600, B1000000, B1152000,
+    //           B1500000, B2000000, B2500000, B3000000, B3500000, B4000000
+    //	CSIZE: - CS5, CS6, CS7, CS8
+    //	CLOCAL - Ignore modem status lines
+    //	CREAD  - Enable receiver
+    //	IGNPAR = Ignore characters with parity errors
+    //	ICRNL  - Map CR to NL on input (Use for ASCII comms where you want to auto correct end of line characters - don't use for bianry comms!)
+    //	PARENB - Parity enable
+    //	PARODD - Odd parity (else even)
+
+    port_options.c_cflag &= ~PARENB;            // Disables the Parity Enable bit(PARENB)
+    port_options.c_cflag &= ~CSTOPB;            // CSTOPB = 2 Stop bits,here it is cleared so 1 Stop bit
+    port_options.c_cflag &= ~CSIZE;	            // Clears the mask for setting the data size
+    port_options.c_cflag |=  CS8;               // Set the data bits = 8
+    port_options.c_cflag &= ~CRTSCTS;           // No Hardware flow Control
+    port_options.c_cflag |=  CREAD | CLOCAL;                  // Enable receiver,Ignore Modem Control lines
+    port_options.c_iflag &= ~(IXON | IXOFF | IXANY);          // Disable XON/XOFF flow control both input & output
+    port_options.c_iflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Non Cannonical mode
+    port_options.c_oflag &= ~OPOST;                           // No Output Processing
+
+    port_options.c_lflag = 0;               //  enable raw input instead of canonical,
+
+    port_options.c_cc[VMIN]  = VMINX;       // Read at least 1 character
+    port_options.c_cc[VTIME] = 10;           // Wait one second
+
+    cfsetispeed(&port_options,BAUDRATE);    // Set Read  Speed
+    cfsetospeed(&port_options,BAUDRATE);    // Set Write Speed
+
+    // Set the attributes to the termios structure
+    int att = tcsetattr(fid, TCSANOW, &port_options);
+
+    if (att != 0 ) {
+        std::cerr << "\nERROR in Setting port attributes" << std::endl;
+    }
+
+    // Flush Buffers
+    tcflush(fid, TCIFLUSH);
+    tcflush(fid, TCIOFLUSH);
+}
+
+bool write_serial(int fid, std::string msg) {
+    unsigned char tx_buffer[msg.size()];
+    unsigned char *p_tx_buffer;
+
+    p_tx_buffer = &tx_buffer[0];
+
+    for(char i : msg) {
+        *p_tx_buffer++ = i;
+    }
+
+    if (fid != -1)
+    {
+        int count = write(fid, &tx_buffer[0], (p_tx_buffer - &tx_buffer[0]));		//Filestream, bytes to write, number of bytes to write
+        usleep(1000);   // .001 sec delay
+        if (count < 0)  return false; // write failed
+    }
+    return true;
 }
 
 int main()
@@ -147,6 +256,16 @@ int main()
 	std::vector<std::vector<cv::Point>> contours;
 	std::vector<cv::Vec4i> hierachy;
 	std::vector<cv::Point> centers;
+	cv::Point lastFoundPoint;
+	
+	// Setup Serial Communication
+	int fid= -1;
+    uart_setup(fid);
+    
+    if (fid == -1) {
+        std::cerr << "Error - Unable to open UART.  Ensure it is not in use by another application\n";
+    }
+    usleep(500000);   // 0.5 sec delay
 	
 	for(;;){
 		if(!input.read(cameraCapture)){
@@ -177,9 +296,21 @@ int main()
 		cv::drawContours(imageUndistorted, contours, -1, cv::Scalar(0, 0, 255), 2); //draw the contours to visualize the found line
 				
 		for(int i = 0; i < centers.size(); i++){ //iterate over the amount of center pixels
-			foundPath = findPath(pathDepth, searchRadius, centers[i], convertImage(imageUndistorted, cv::Range(0, imageUndistorted.size().height), cv::Range(0, imageUndistorted.size().width)), imageUndistorted); //find the path of the line
+			[foundPath, lastFoundPoint] = findPath(pathDepth, searchRadius, centers[i], convertImage(imageUndistorted, cv::Range(0, imageUndistorted.size().height), cv::Range(0, imageUndistorted.size().width)), imageUndistorted); //find the path of the line
 			if(foundPath.empty()){
 				foundPath = imageUndistorted;
+			}
+			// Find the angle between start and end in relation to a vertical line
+			float angle = cv::atan2(centers[i].y - lastFoundPoint.y, centers[i].x - lastFoundPoint.x) / cv::CV_PI;
+			// between 0 and 1 go left, between 1 and 2 go right
+			if (angle >= 0 && angle <= 1 - angleThresh) {
+				std::cout << serial_write(fid, "R2:" << 255-angle*255 << ":L1:" << 255-angle*255 << "\n") << angle << std::endl; // turn left
+			} else if (angle >= 1 + angleThresh && angle <= 2) {
+				std::cout << serial_write(fid, "R1:" << (angle-1)*255 << ":L2:" << angle(-1)*255 << "\n") << angle << std::endl; // turn right
+			} else if (angle > 1 - angleThresh && angle < 1 + angleThresh) {
+				std::cout << serial_write(fid, "R2:" << 255 << ":L2:" << 255 << "\n") << angle << std::endl; // go forward
+			} else {
+				std::cout << "angle: " << angle << std::endl;
 			}
 		}
 

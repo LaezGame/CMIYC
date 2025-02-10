@@ -55,12 +55,16 @@ void readSerialData() {
             char** incomingCom = split_str(inputBuffer, del);
             if (incomingCom[0][0] == 'R') {
                 memmove(incomingCom[0], incomingCom[0]+1, strlen(incomingCom[0])); // remove first character 'R'
-                if (atoi(incomingCom[0]) > 0) motorR.setDirection(atoi(incomingCom[2]));
-                if (atoi(incomingCom[1]) > 0) motorR.setSpeed(atoi(incomingCom[3]));
+                int fValue = atoi(incomingCom[0]);
+                if (fValue > 0 && fValue < 3) motorR.setDirection(fValue-1);
+                int sValue = atoi(incomingCom[1]);
+                if (sValue > 0 && sValue < 256) motorR.setSpeed(sValue);
             } else if (incomingCom[0][0] == 'L') {
                 memmove(incomingCom[0], incomingCom[0]+1, strlen(incomingCom[0])); // remove first character 'L'
-                if (atoi(incomingCom[0]) > 0) motorL.setDirection(atoi(incomingCom[0]));
-                if (atoi(incomingCom[1]) > 0) motorL.setSpeed(atoi(incomingCom[1]));
+                int fValue = atoi(incomingCom[0]);
+                if (fValue > 0 && fValue < 3) motorL.setDirection(fValue-1);
+                int sValue = atoi(incomingCom[1]);
+                if (sValue > 0 && sValue < 256) motorL.setSpeed(sValue);
             }
             //Serial.println(inputBuffer);
             for(int i = 0; i < sizeof(incomingCom); i++){
