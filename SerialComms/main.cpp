@@ -41,9 +41,10 @@ int main()
     std::string input;
 
     while(true) {
-        std::cout << write_serial(fid, "1:200:2:001\n") << std::endl;
+        std::cout << write_serial(fid, "R0:100\nL1:200\n") << std::endl;
 
-        usleep(500000);  // 0.5 sec delay
+        //usleep(500000);  // 0.5 sec delay
+        usleep(1000);   // .001 sec delay
         
 		/*input = read_serial(fid, MSG_LEN);
 		if (input.size() == MSG_LEN) {

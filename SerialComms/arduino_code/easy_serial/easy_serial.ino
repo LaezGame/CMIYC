@@ -7,7 +7,6 @@
 char inputBuffer[BUFFER_SIZE];
 int bufferIndex = 0;
 const char del = ':';
-const char** incomingCom;
 
 Motor motorL;
 Motor motorR;
@@ -22,11 +21,11 @@ void setup() {
 
 void loop() {
     readSerialData();
-    delay(500);
+    delay(100);
 }
 
-const char** split_str(const char* s, char del) {
-      static const int MAX_TOKENS = 3;
+char** split_str(const char* s, char del) {
+      static const int MAX_TOKENS = 2;
       static const char* delimited[MAX_TOKENS];
   
       int tokenCount = 0;
@@ -53,14 +52,19 @@ void readSerialData() {
 
         // (3) Process if newline
         if (receivedChar == '\n' && bufferIndex > 0) {
-            incomingCom = split_str(inputBuffer, del);
-            if (atoi(incomingCom[0]) > 0) motorL.setDirection(atoi(incomingCom[0]));
-            if (atoi(incomingCom[1]) > 0) motorL.setSpeed(atoi(incomingCom[1]));
-            if (atoi(incomingCom[2]) > 0) motorR.setDirection(atoi(incomingCom[2]));
-            if (atoi(incomingCom[3]) > 0) motorR.setSpeed(atoi(incomingCom[3]));
+            char** incomingCom = split_str(inputBuffer, del);
+            if (incomingCom[0][0] == 'R') {
+                memmove(incomingCom[0], incomingCom[0]+1, strlen(incomingCom[0])); // remove first character 'R'
+                if (atoi(incomingCom[0]) > 0) motorR.setDirection(atoi(incomingCom[2]));
+                if (atoi(incomingCom[1]) > 0) motorR.setSpeed(atoi(incomingCom[3]));
+            } else if (incomingCom[0][0] == 'L') {
+                memmove(incomingCom[0], incomingCom[0]+1, strlen(incomingCom[0])); // remove first character 'L'
+                if (atoi(incomingCom[0]) > 0) motorL.setDirection(atoi(incomingCom[0]));
+                if (atoi(incomingCom[1]) > 0) motorL.setSpeed(atoi(incomingCom[1]));
+            }
+            //Serial.println(inputBuffer);
             for(int i = 0; i < sizeof(incomingCom); i++){
-                Serial.print(i);
-                //Serial.print(incomingCom[i]);
+                Serial.println(incomingCom[i]);
             }
             bufferIndex = 0;  // Clear buffer after processing
         }
