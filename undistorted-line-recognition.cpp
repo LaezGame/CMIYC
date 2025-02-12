@@ -36,6 +36,7 @@ double angleWeightModifier = 1.0;
 float angleThresh = 0.01;
 float borderThresh = 0.01;
 double relativePosition = 0.5;
+bool goRightAtCrossing = true;
 /////////////////////
 
 std::vector<cv::Point> getOrderedSurroundingPoints(cv::Mat image, cv::Point centerPixel, int radius, int pointAmount) {
@@ -577,6 +578,22 @@ int main()
 				drawBranchWithGrade(imageUndistorted, branches[idx], branchGrade[idx], colorIntensity);
 			}
 		}
+		
+		// Look if there are any crossings
+		switch (findCrossing(convertedFullImage, bestBranchPoints) {
+			case 'i':
+				goRightAtCrossing ? sendMotorData(-255, 255, fid) : sendMotorData(255, -255, fid);
+				break;
+			case 'l':
+				sendMotorData(255, -255, fid);
+				break;
+			case 'r':
+				sendMotorData(-255, 255, fid);
+			default:
+				break;
+		}
+			
+		
 		// Find the angle between start and end in relation to a vertical line
 		float angle = std::atan2(firstFoundPoint.y - lastFoundPoint.y, firstFoundPoint.x - lastFoundPoint.x) / M_PI;
 		/*// between 0 and 0.5 go left, between 0.5 and 1 go right
