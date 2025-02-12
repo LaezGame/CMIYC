@@ -1,0 +1,50 @@
+//Motoranschluesse
+// Sie können hier die Pinbelegung beliebig aendern
+#define EnA 6
+#define EnB 5
+#define In1 7
+#define In2 8
+#define In3 4
+#define In4 3
+#define LED 7
+ 
+ 
+void setup()
+{
+  // Pins als Output deklarieren
+  pinMode(EnA, OUTPUT);
+  pinMode(EnB, OUTPUT);
+  pinMode(In1, OUTPUT);
+  pinMode(In2, OUTPUT);
+  pinMode(In3, OUTPUT);
+  pinMode(In4, OUTPUT);
+  pinMode(LED, OUTPUT);
+}
+void vorwaerts()   //beide Motoren vorwärts drehen lassen
+{
+  // Motor A einschalten
+  digitalWrite(In1, LOW);
+  digitalWrite(In2, LOW);
+  // Geschwindigkeit 150 von max. 255
+  analogWrite(EnA, 255);
+  // Motor A einschalten
+  digitalWrite(In3, LOW);
+  digitalWrite(In4, HIGH);
+  // Geschwindigkeit 150 von max. 255
+  analogWrite(EnB, 255);
+  delay(2000);
+  // alle Motoren ausschalten
+  digitalWrite(In1, LOW);
+  digitalWrite(In2, LOW);  
+  digitalWrite(In3, LOW);
+  digitalWrite(In4, LOW);
+  /*delay(2000);
+  digitalWrite(LED, 255);
+  delay(2000);
+  digitalWrite(LED, 0);*/
+}
+void loop()
+{
+  vorwaerts();
+  delay(1000);
+}
