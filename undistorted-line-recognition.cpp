@@ -421,6 +421,75 @@ void sendMotorData(int rSpeed, int lSpeed, int fid){
 	std::cout << write_serial(fid, writeString) << std::endl;
 }
 
+// Find the contour with the biggest area size
+std::pair<int, int> findBiggestContour(std::vector<std::vector<cv::Point>> contours) {
+	std::pair<int, int> c = std::make_pair(-1, 0);
+	int currentArea;
+	
+	for(int i=0; i<contours.size(); i++) {
+		currentArea = cv::contourArea(contours.at(i));
+		if(currentArea > c.second) {
+			c = std::make_pair(i, currentArea);
+		}
+	}
+	return c;
+}
+
+char findCrossing(cv::Mat &dImg, std::vector<cv::Point> bestBranch) {
+	std::vector<std::vector<cv::Point>> tContours, hContours;
+	bool intersects = false;
+	int leftCount = 0, rightCount = 0;
+	
+	// Define ROI (top part of the image)
+    cv::Rect roi(0, 0, frame.cols, frame.rows * 0.3);
+    cv::Mat dImgTop = frame(roi);
+	
+	//Find the Contours in top part of the image
+	cv::findContours(dImgTop, tContours, hierachy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE); //find contours in the top 30% of the mask
+	
+	for (const std::vector<cv::Point>& contour : tContours) {
+        cv::Rect boundingBox = cv::boundingRect(contour);
+        float aspectRatio = static_cast<float>(boundingBox.width) / boundingBox.height;
+
+        // Filter for horizontal lines based on aspect ratio and width (at least a fourth of image) threshold
+        if (aspectRatio > 3.0 && boundingBox.width > dImg.rows * 0.25) {
+            cv::rectangle(dImg, boundingBox, cv::Scalar(255, 255, 255), 2);  // Draw rectangle for visualization
+            hContours.push_back(contour);
+        }
+    }
+    
+    // Get bounding box for the biggest contour
+    int biggestHContourIdx = findBiggestContour(hContours).first;
+    cv::Rect hBoundingBox = cv::boundingRect(hCotours[biggestHContourIdx]);
+
+	for (const auto& point : verticalPathPoints) {
+		if (hBoundingBox.contains(point)) {
+			intersects = true;
+		}
+		// Check if the point is to the left or right of the vertical path's center
+		if (point.x < hBoundingBox.x + hBoundingBox.width / 2) {
+			leftCount++;
+		} else {
+			rightCount++;
+		}
+	}
+	
+	// Step 3: Analyze the results
+	/*if (intersects) {
+		return 'i'; // intersection to both sides, use preprogrammed direction
+	}*/
+	
+	if (leftCount > 0 && rightCount > 0) {
+		return 'i'; // intersection to both sides, use preprogrammed direction
+	} else if (leftCount > 0) {
+		return 'l'; // intersection to the left, go left
+	} else if (rightCount > 0) {
+		return 'r'; // intersection to the right, go right
+	}
+	
+	return 'n'; // do nothing
+}
+
 int main()
 {
 	std::cout << "Started line recognition. Running:" << version << std::endl; //print version number please refer to SemVer for versioning
@@ -440,7 +509,9 @@ int main()
 	std::vector<std::vector<cv::Point>> contours;
 	std::vector<cv::Vec4i> hierachy;
 	std::vector<cv::Point> centers;
+	std::vector<cv::Point> bestBranchPoints;
 	int numBestPaths = 20; // Number of best paths to draw
+	int bestBranchIndex;
 	
 	int fps;
 
@@ -493,8 +564,11 @@ int main()
 				indices[j] = j;
 			}
 			std::sort(indices.begin(), indices.end(), [&branchGrade](int a, int b) { return branchGrade[a] > branchGrade[b]; });
+			
+			bestBranchIndex = indices[0];  // First element after sorting is the best one
+			bestBranchPoints = branches[bestBranchIndex];
 
-			lastFoundPoint = branches[i].back();
+			lastFoundPoint = bestBranchPoints.back();
 			firstFoundPoint = centers[i];
 			// Draw the top N best branches
 			for (int j = 0; j < std::min(numBestPaths, static_cast<int>(indices.size())); j++) {
